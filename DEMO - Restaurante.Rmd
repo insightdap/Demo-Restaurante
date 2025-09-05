@@ -48,7 +48,12 @@ library(googlesheets4)
 library(gargle)
 
 #Autenticación   ------------------------------------------------------
-gs4_auth(path = "gs4_encuestas_serviceaccount.json")
+try(gs4_auth(
+  path = secret_decrypt_json(
+    "gs4_encuestas_serviceaccount_enc.json",
+    key = "GS4_ENCUESTAS_KEY"
+  )
+))
 
 #Importación   --------------------------------------------------------
 data <- read_sheet("19rG6WCDC48dscewCJhI4At-3p5_14A09vxdJuNZM6ns")

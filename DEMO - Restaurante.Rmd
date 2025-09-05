@@ -1,0 +1,1053 @@
+---
+title: "DEMO - Restaurantes"
+output: 
+  flexdashboard::flex_dashboard:
+    logo: logo_insight.png
+    vertical_layout: scroll
+    theme:
+      bootswatch: spacelab   #tema predeterminado
+      navbar-bg: "#1B1D66"  #Color barra de navegación
+      navbar-light-brand-color: "#FFF" #Color letra titulo Dashboard
+      navbar-light-active-color: "#00D5D4"  #Color de menú seleccionado
+      navbar-light-hover-color: "#FFF"  #Color de selección de menú principal
+      dropdown-link-hover-bg: "#1F41AF" #Sombra de selección submenu
+      dropdown-link-color: "#FEFEFE"    #Letras menu
+      dropdown-bg: "#303440"            #Fondo menu
+      body-bg: "#F1F4F9"   #Color de fondo de la pagina
+      card-bg: "#FFFFFF"   #Color de fondo de los cards
+#      info: "#FFF"  #Color letras menú principal
+      # blue: "#1F41AF"
+#    css: "custom.scss"
+
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(dplyr)
+library(tibble) 
+library(forcats)
+library(tidyr)
+library(purrr)
+library(stringr)
+library(scales)
+library(lubridate)
+library(readxl)
+library(highcharter)
+library(ggplot2)
+library(gtsummary)
+library(reactable)
+library(reactablefmtr)
+library(htmltools)
+library(htmlwidgets)
+library(plotly)
+library(crosstalk)
+library(bslib)
+library(sass)
+library(bsicons)
+library(googlesheets4)
+library(gargle)
+
+#Autenticación   ------------------------------------------------------
+gs4_auth(path = "gs4_encuestas_serviceaccount.json")
+
+#Importación   --------------------------------------------------------
+data <- read_sheet("19rG6WCDC48dscewCJhI4At-3p5_14A09vxdJuNZM6ns")
+
+
+#Clasificación de respuestas   ----------------------------------------
+# Asignación de niveles de demográficos
+data <- data %>% 
+  mutate(demo_1 = factor(demo_1, levels = c("Femenino","Masculino","Prefiero no responder")),
+         demo_2 = factor(demo_2, levels = c("Menor de 18 años",
+                                            "18 a 25 años",
+                                            "26 a 30 años",
+                                            "31 a 35 años",
+                                            "36 a 40 años",
+                                            "41 a 45 años",
+                                            "46 a 50 años",
+                                            "51 a 55 años",
+                                            "56 años o más")),
+         demo_3 = factor(demo_3, levels = c("Desayuno","Almuerzo","Cena")),
+         demo_4 = factor(demo_4, levels = c("1 vez", "2 veces", "3 veces","4 veces o más")),
+         demo_sucursal = factor(demo_sucursal, levels = c("Sucursal 1","Sucursal 2","Sucursal 3","Sucursal 4"))) 
+
+#Clasificación de atributos
+# Validar la cantidad de atributos creados en la encuesta
+atributos_claves <- tibble(atributo = c("atributo_1", "atributo_2", "atributo_3",
+                                        "atributo_4", "atributo_5", "atributo_6",
+                                        "atributo_7","atributo_8"),
+                           atributo_label = factor(atributo,levels = atributo,
+                                 labels = c("Tiempo de Espera de Orden","Calidad de Alimentos","Limpieza General",
+                                            "Atención de Personal","Instalaciones y Parqueo","Limpieza de Sanitarios",
+                                            "Precio Pagado","Variedad de Menú")))
+#Clasificación de Indicadores
+indicadores_claves <- tibble(indicador = c("csat_q", "repurchase_q", "loyalty_q","nps_q"),
+                             indicador_label = factor(indicador,levels = indicador,
+                                                      labels = c("Satisfacción del Cliente",
+                                                                 "Retorno del Cliente",
+                                                                 "Lealtad",
+                                                                 "Net Promoter Score")))
+#Creando copia de NPS para conteo por digitos y creando variable de fecha correcta
+data <- data %>% 
+  mutate(nps_numeros = nps_q,
+         fecha = `Submitted at`- hours(6),
+         dia = day(fecha),
+         dia_semana = wday(fecha,label = TRUE,abbr = FALSE),
+         mes_num = month(fecha),
+         hora = hour(fecha)) %>% 
+  relocate(fecha, .after = `Submitted at`)
+
+#Reemplazando escala de estrellas a números.Verificar si hay cambios de escalas para ajustar acá.
+escala_atributos <- c(
+  "Muy Insatisfecho ⭐" = "1",
+  "Insatisfecho         ⭐⭐" = "2",
+  "No estoy seguro  ⭐⭐⭐" = "3",
+  "Satisfecho            ⭐⭐⭐⭐" = "4",
+  "Muy satisfecho    ⭐⭐⭐⭐⭐" = "5"
+)
+
+escala_retorno <- c(
+  "Nada probable        ⭐" = "1",
+  "Poco probable        ⭐⭐" = "2",
+  "Probable                 ⭐⭐⭐" = "3",
+  "Bastante probable  ⭐⭐⭐⭐" = "4",
+  "Muy probable         ⭐⭐⭐⭐⭐" = "5"
+)
+
+escala_lealtad <- c(
+  "Nada        ⭐" = "1",
+  "Poco        ⭐⭐" = "2",
+  "Regular    ⭐⭐⭐" = "3",
+  "Bastante  ⭐⭐⭐⭐" = "4",
+  "Mucho     ⭐⭐⭐⭐⭐" = "5"
+)
+
+data <- data %>% 
+  mutate(across(starts_with("atributo"), ~as.integer(str_replace_all(., escala_atributos))),
+         across(csat_q, ~as.integer(str_replace_all(., escala_atributos))),
+         across(repurchase_q, ~as.integer(str_replace_all(., escala_retorno))),
+         across(loyalty_q, ~as.integer(str_replace_all(., escala_lealtad))))
+
+
+#Clasificación de respuestas
+data <- data %>% 
+  mutate(across(starts_with("atributo"),
+         ~factor(.,levels = c(1,2,3,4,5), labels = c("Insatisfecho","Insatisfecho","Regular","Satisfecho","Satisfecho"))),
+         across(c(csat_q,repurchase_q,loyalty_q),
+         ~factor(.,levels = c(1,2,3,4,5), labels = c("Insatisfecho","Insatisfecho","Regular","Satisfecho","Satisfecho"))),
+         nps_q = factor(nps_q, levels = c(1,2,3,4,5,6,7,8,9,10), 
+                        labels = c("Detractores","Detractores","Detractores","Detractores","Detractores","Detractores",
+                                   "Pasivos","Pasivos","Promotores","Promotores")))
+
+# Pesos de Indicadores en CX Index
+indicadores_pesos <- tibble(indicador = c("csat_q", "repurchase_q", "loyalty_q", "nps_q"),
+            peso =  c(0.5, 0.2, 0.2, 0.1))
+
+#Temas personalizados  ----------------------------------------
+#Highcharts
+tema_general_hc <- hc_theme_merge(
+  hc_theme_elementary(),
+  hc_theme(
+    colors = c("#3F1B87","#39C5DE","#3EF7D7","#824DF7","#292B30","#FF6700","#5C6066"),
+    chart = list(
+      backgroundColor = "#FFF",
+      style = list(
+          fontFamily = "Roboto",
+          color = "#000000"),
+      zoomType = "x"
+    ),
+    title = list(
+        align = "left",
+        style = list(
+          fontFamily = "Roboto",
+          color = "#000000",
+          fontWeight = "bold")
+    ),
+    subtitle = list(
+        align = "left",
+        style = list(
+          fontFamily = "Roboto",
+          color = "#000000",
+          fontWeight = "bold")
+    )
+  )
+)
+
+#Tablas de resultados globales  ----------------------------------------
+
+#Cantidad de respuestas globales y diarias
+respuestas_totales <- data %>% 
+  count()
+
+respuestas_diario <- data %>% 
+  mutate(dias = floor_date(fecha, "day")) %>% 
+  group_by(dias) %>% 
+  count() 
+
+#Atributos resultado global
+atributos_global <- data %>%
+  select(starts_with("atributo")) %>%
+  map_dfr(
+    .f = ~ {
+      tibble(
+        segmento = levels(.x),
+        respuestas = as.integer(table(.x, useNA = "no")),
+        porcentaje = as.double(round(prop.table(table(.x, useNA = "no")) * 100, 0))
+      )
+    },
+    .id = "atributo"
+  )
+
+atributos_global <- atributos_global %>% 
+  left_join(atributos_claves, by = "atributo")
+
+#Metricas Principales resultado global
+indicadores_global <- data %>%
+  select(ends_with("q")) %>%
+  map_dfr(
+    .f = ~ {
+      tibble(
+        segmento = levels(.x),
+        respuestas = as.integer(table(.x, useNA = "no")),
+        porcentaje = as.double(round(prop.table(table(.x, useNA = "no")) * 100, 0))
+      )
+    },
+    .id = "indicador"
+  )
+
+#NPS
+nps_global <- indicadores_global %>% 
+  filter(indicador == "nps_q") %>% 
+  select(-respuestas) %>% 
+  pivot_wider(names_from = segmento, values_from = porcentaje, values_fill = 0) %>% 
+  rowwise() %>% 
+  mutate(nps_score = Promotores-Detractores)
+
+#CX Global
+cx_global <- indicadores_global %>% 
+  filter(segmento == "Satisfecho") %>% 
+  select(indicador,porcentaje) %>% 
+  full_join(select(nps_global,indicador,nps_score),by = join_by(indicador, porcentaje == nps_score)) %>% #Agregando score nps
+  left_join(indicadores_pesos,by = "indicador") %>%    #Agregando pesos personalizados
+  pivot_wider(names_from = indicador,  values_from = c(porcentaje,peso), values_fill = 0, names_vary = "slowest") %>% 
+  rowwise() %>% 
+  mutate(cx_global = round(sum(porcentaje_csat_q * peso_csat_q, porcentaje_repurchase_q * peso_repurchase_q,
+                         porcentaje_loyalty_q * peso_loyalty_q, 
+                         if_else(porcentaje_nps_q >= 0,porcentaje_nps_q,0)  * peso_nps_q),digits = 0))
+
+#Tablas de resultados diarios  ----------------------------------------
+
+# Calculos de resultados diarios
+atributos_diarios <- data %>%
+  mutate(dias = floor_date(fecha, "day")) %>% 
+  select(dias,starts_with("atributo")) %>%
+  nest(data = -dias) %>% 
+  mutate(
+    respuestas = map(data,function(grupos) {
+    grupos %>%
+      pivot_longer(cols = everything(), names_to = "atributo", values_to = "segmento") %>% 
+      count(atributo, segmento) %>%
+      group_by(atributo) %>%
+      mutate(porcentaje = round(n / sum(n) * 100, 0)) %>%
+      ungroup()
+    })
+  ) %>% 
+  select(-data) %>% 
+  unnest(respuestas)
+
+atributos_diarios <- atributos_diarios %>% 
+  left_join(atributos_claves, by = "atributo")
+
+
+indicadores_diarios <- data %>%
+  mutate(dias = floor_date(fecha, "day")) %>% 
+  select(dias,ends_with("q")) %>%
+  nest(data = -dias) %>% 
+  mutate(
+    respuestas = map(data,function(grupos) {
+    grupos %>%
+      pivot_longer(cols = everything(), names_to = "indicador", values_to = "segmento") %>% 
+      count(indicador, segmento) %>%
+      group_by(indicador) %>%
+      mutate(porcentaje = round(n / sum(n) * 100, 0)) %>%
+      ungroup()
+    })
+  ) %>% 
+  select(-data) %>% 
+  unnest(respuestas)
+
+nps_diario <- indicadores_diarios %>% 
+  filter(indicador == "nps_q") %>% 
+  select(-n) %>% 
+  pivot_wider(names_from = segmento, values_from = porcentaje, values_fill = 0) %>% 
+  rowwise() %>% 
+  mutate(nps_score = Promotores-Detractores)
+
+cx_diario <- indicadores_diarios %>% 
+  filter(segmento == "Satisfecho") %>% 
+  select(dias,indicador,porcentaje) %>% 
+  full_join(select(nps_diario,dias,indicador,nps_score),by = join_by(dias,indicador, porcentaje == nps_score)) %>% 
+  left_join(indicadores_pesos,by = "indicador") %>% 
+  pivot_wider(names_from = indicador, values_from = c(porcentaje,peso), values_fill = 0, names_vary = "slowest") %>% 
+  full_join(respuestas_diario, by = "dias") %>% 
+  mutate(across(ends_with("q"), ~replace_na(.x,0))) %>% 
+  rowwise() %>% 
+  mutate(cx_global = round(sum(porcentaje_csat_q * peso_csat_q, porcentaje_repurchase_q * peso_repurchase_q,
+                         porcentaje_loyalty_q * peso_loyalty_q, 
+                         if_else(porcentaje_nps_q>=0,porcentaje_nps_q,0)  * peso_nps_q),digits = 0)) %>% 
+  arrange(dias)
+
+
+```
+
+
+Respuestas {data-orientation=rows}
+======================================================================
+
+
+Row {data-height=350}
+-----------------------------------------------------------------------
+
+
+```{r Respuestas diarias}
+
+card(
+  full_screen = TRUE,
+  card_body(
+    respuestas_diario %>% 
+      mutate(tiempo = dias %>% datetime_to_timestamp()) %>% 
+      hchart("spline", hcaes(x = tiempo, y = n), name = "Respuestas") %>%
+      hc_title(text = "Respuestas") %>%
+      hc_subtitle(text = "Tendencia diaria") %>% 
+      hc_xAxis(type = "datetime", labels = list(format = "{value:%d-%b}"), title = list(text = "")) %>% 
+      hc_yAxis(title = list(text = "Cantidad de Respuestas")) %>%
+      hc_plotOptions(spline = list(
+        lineWidth = 3,
+        # states = list(hover = list(lineWidth = 5)), #resalta la linea al pasar el mouse
+        marker = list(enabled = FALSE),
+        dataLabels=list(enabled=TRUE, format="{point.y:.0f}")
+      )) %>% 
+      hc_add_theme(tema_general_hc) %>% 
+      hc_exporting(enabled = TRUE)
+  ))  
+
+
+```
+
+
+Row {data-height=350}
+-----------------------------------------------------------------------
+
+```{r Respuestas por dia y horas}
+
+layout_column_wrap(
+  width = 1/2,
+  height = 340,
+  card(
+    full_screen = TRUE,
+    card_body(
+      data %>%
+      group_by(dia_semana) %>%
+      count() %>% 
+      ungroup() %>% 
+      mutate(prop = round(n/sum(n)*100,digits = 0)) %>% 
+      hchart("column", hcaes(x = dia_semana, y = n,z = prop), name = "Respuestas") %>%
+      hc_title(text = "Respuestas") %>%
+      hc_subtitle(text = "Frecuencia por día de semana") %>% 
+      hc_xAxis(title = list(text = "")) %>% 
+      hc_yAxis(title = list(text = "Cantidad de Respuestas")) %>%
+      hc_plotOptions(column=list(
+      dataLabels=list(enabled=TRUE, format="{point.y:.0f} ({point.z:.0f}%)"))) %>% 
+      hc_tooltip(enabled = FALSE) %>% 
+      hc_add_theme(tema_general_hc) %>% 
+      hc_exporting(enabled = TRUE)
+  )),
+  card(
+    full_screen = TRUE,
+    card_body(
+      data %>%
+      group_by(hora) %>%
+      count() %>% 
+      ungroup() %>% 
+      mutate(prop = round(n/sum(n)*100,digits = 0)) %>% 
+      hchart("column", hcaes(x = hora, y = n,z = prop), name = "Respuestas") %>%
+      hc_title(text = "Respuestas") %>%
+      hc_subtitle(text = "Frecuencia por hora del día") %>% 
+      hc_xAxis(title = list(text = "")) %>% 
+      hc_yAxis(title = list(text = "Cantidad de Respuestas")) %>%
+      hc_plotOptions(column=list(
+      dataLabels=list(enabled=TRUE, format="{point.y:.0f} ({point.z:.0f}%)"))) %>% 
+      hc_tooltip(enabled = FALSE) %>% 
+      hc_add_theme(tema_general_hc) %>% 
+      hc_exporting(enabled = TRUE)
+  ))
+)
+
+
+```
+
+
+Row {data-height=350}
+-----------------------------------------------------------------------
+
+```{r Respuestas por sucursal}
+
+layout_column_wrap(
+  width = NULL,
+  style = css(grid_template_columns = "1fr 2fr"),
+  height = 340,
+  card(
+    full_screen = TRUE,
+    card_body(
+      data %>%
+      group_by(demo_sucursal) %>%
+      count() %>% 
+      ungroup() %>% 
+      hchart(type="pie",hcaes(x=demo_sucursal,y=n),name="Sucursales") %>% 
+      hc_title(text="Respuestas por Sucursales")%>%
+      # hc_subtitle(text="") %>%
+      hc_plotOptions(pie=list(
+        innerSize="55%",
+        tooltip=list(pointFormat="{point.y:,.0f} ({point.percentage:.0f}%)"),
+        dataLabels=list(enabled=TRUE,
+                        format="{point.name}</br>{point.y:,.0f} ({point.percentage:.0f}%)"))
+        )%>%
+      hc_yAxis(title=list(text=""))%>%
+      hc_xAxis(title=list(text=""))%>%
+      hc_add_theme(tema_general_hc) %>% 
+      hc_exporting(enabled=TRUE)
+  )),
+  card(
+    full_screen = TRUE,
+    card_body(
+     data %>%
+      group_by(floor_date(fecha, "day"),demo_sucursal) %>%
+      count() %>% 
+      rename("dias"=1) %>% 
+      ungroup() %>% 
+      mutate(tiempo = dias %>% datetime_to_timestamp()) %>% 
+      hchart("spline", hcaes(x = tiempo, y = n, group = demo_sucursal)) %>%
+      hc_title(text = "Respuestas por Sucursales") %>%
+      hc_subtitle(text = "Tendencia diaria") %>% 
+      hc_xAxis(type = "datetime", labels = list(format = "{value:%d-%b}"), title = list(text = "")) %>% 
+      hc_yAxis(title = list(text = "Cantidad de Respuestas")) %>%
+      hc_plotOptions(spline = list(
+        lineWidth = 2,
+        states = list(hover = list(lineWidth = 5)), #resalta la linea al pasar el mouse
+        marker = list(enabled = FALSE),
+        dataLabels=list(enabled=TRUE, format="<span style='color:{series.color}'>{point.y:.0f}</span>"))
+      ) %>% 
+      hc_add_theme(tema_general_hc) %>% 
+      hc_exporting(enabled = TRUE)
+
+  ))
+)
+
+```
+
+Row {data-height=350}
+-----------------------------------------------------------------------
+
+```{r Respuestas por Genero (demo1)}
+
+layout_column_wrap(
+  width = NULL,
+  style = css(grid_template_columns = "1fr 2fr"),
+  height = 340,
+  card(
+    full_screen = TRUE,
+    card_body(
+      data %>%
+      group_by(demo_1) %>%
+      count() %>% 
+      ungroup() %>% 
+      hchart(type="pie",hcaes(x=demo_1,y=n),name="Género") %>% 
+      hc_title(text="Respuestas por Género")%>%
+      # hc_subtitle(text="") %>%
+      hc_plotOptions(pie=list(
+        innerSize="55%",
+        tooltip=list(pointFormat="{point.y:,.0f} ({point.percentage:.0f}%)"),
+        dataLabels=list(enabled=TRUE,
+                        format="{point.name}</br>{point.y:,.0f} ({point.percentage:.0f}%)"))
+        )%>%
+      hc_yAxis(title=list(text=""))%>%
+      hc_xAxis(title=list(text=""))%>%
+      hc_add_theme(tema_general_hc) %>% 
+      hc_exporting(enabled=TRUE)
+  )),
+  card(
+    full_screen = TRUE,
+    card_body(
+     data %>%
+      group_by(floor_date(fecha, "day"),demo_1) %>%
+      count() %>% 
+      rename("dias"=1) %>% 
+      ungroup() %>% 
+      mutate(tiempo = dias %>% datetime_to_timestamp()) %>% 
+      hchart("spline", hcaes(x = tiempo, y = n, group = demo_1)) %>%
+      hc_title(text = "Respuestas por Género") %>%
+      hc_subtitle(text = "Tendencia diaria") %>% 
+      hc_xAxis(type = "datetime", labels = list(format = "{value:%d-%b}"), title = list(text = "")) %>% 
+      hc_yAxis(title = list(text = "Cantidad de Respuestas")) %>%
+      hc_plotOptions(spline = list(
+        lineWidth = 2,
+        states = list(hover = list(lineWidth = 5)), #resalta la linea al pasar el mouse
+        marker = list(enabled = FALSE),
+        dataLabels=list(enabled=TRUE, format="<span style='color:{series.color}'>{point.y:.0f}</span>"))
+        ) %>% 
+      hc_add_theme(tema_general_hc) %>% 
+      hc_exporting(enabled = TRUE)
+
+  ))
+)
+
+```
+
+
+Row {data-height=350}
+-----------------------------------------------------------------------
+
+```{r Respuestas por Edad (demo2)}
+
+layout_column_wrap(
+  width = NULL,
+  style = css(grid_template_columns = "1fr 2fr"),
+  height = 340,
+  card(
+    full_screen = TRUE,
+    card_body(
+      data %>%
+      group_by(demo_2) %>%
+      count() %>% 
+      ungroup() %>% 
+      hchart(type="pie",hcaes(x=demo_2,y=n),name="Edad") %>% 
+      hc_title(text="Respuestas por Edad")%>%
+      # hc_subtitle(text="") %>%
+      hc_plotOptions(pie=list(
+        innerSize="55%",
+        tooltip=list(pointFormat="{point.y:,.0f} ({point.percentage:.0f}%)"),
+        dataLabels=list(enabled=TRUE,
+                        format="{point.name}</br>{point.y:,.0f} ({point.percentage:.0f}%)"))
+        )%>%
+      hc_yAxis(title=list(text=""))%>%
+      hc_xAxis(title=list(text=""))%>%
+      hc_add_theme(tema_general_hc) %>% 
+      hc_exporting(enabled=TRUE)
+  )),
+  card(
+    full_screen = TRUE,
+    card_body(
+     data %>%
+      group_by(floor_date(fecha, "day"),demo_2) %>%
+      count() %>% 
+      rename("dias"=1) %>% 
+      ungroup() %>% 
+      mutate(tiempo = dias %>% datetime_to_timestamp()) %>% 
+      hchart("spline", hcaes(x = tiempo, y = n, group = demo_2)) %>%
+      hc_title(text = "Respuestas por Edad") %>%
+      hc_subtitle(text = "Tendencia diaria") %>% 
+      hc_xAxis(type = "datetime", labels = list(format = "{value:%d-%b}"), title = list(text = "")) %>% 
+      hc_yAxis(title = list(text = "Cantidad de Respuestas")) %>%
+      hc_plotOptions(spline = list(
+        lineWidth = 2,
+        states = list(hover = list(lineWidth = 5)), #resalta la linea al pasar el mouse
+        marker = list(enabled = FALSE),
+        dataLabels=list(enabled=TRUE, format="<span style='color:{series.color}'>{point.y:.0f}</span>"))
+        ) %>% 
+      hc_add_theme(tema_general_hc) %>% 
+      hc_exporting(enabled = TRUE)
+
+  ))
+)
+
+```
+
+
+Row {data-height=350}
+-----------------------------------------------------------------------
+
+```{r Respuestas por turnos (demo3)}
+
+layout_column_wrap(
+  width = NULL,
+  style = css(grid_template_columns = "1fr 2fr"),
+  height = 340,
+  card(
+    full_screen = TRUE,
+    card_body(
+      data %>%
+      group_by(demo_3) %>%
+      count() %>% 
+      ungroup() %>% 
+      hchart(type="pie",hcaes(x=demo_3,y=n),name="Turno") %>% 
+      hc_title(text="Respuestas por Turno de Visita")%>%
+      # hc_subtitle(text="") %>%
+      hc_plotOptions(pie=list(
+        innerSize="55%",
+        tooltip=list(pointFormat="{point.y:,.0f} ({point.percentage:.0f}%)"),
+        dataLabels=list(enabled=TRUE,
+                        format="{point.name}</br>{point.y:,.0f} ({point.percentage:.0f}%)"))
+        )%>%
+      hc_yAxis(title=list(text=""))%>%
+      hc_xAxis(title=list(text=""))%>%
+      hc_add_theme(tema_general_hc) %>% 
+      hc_exporting(enabled=TRUE)
+  )),
+  card(
+    full_screen = TRUE,
+    card_body(
+     data %>%
+      group_by(floor_date(fecha, "day"),demo_3) %>%
+      count() %>% 
+      rename("dias"=1) %>% 
+      ungroup() %>% 
+      mutate(tiempo = dias %>% datetime_to_timestamp()) %>% 
+      hchart("spline", hcaes(x = tiempo, y = n, group = demo_3)) %>%
+      hc_title(text = "Respuestas por Turno de Visita") %>%
+      hc_subtitle(text = "Tendencia diaria") %>% 
+      hc_xAxis(type = "datetime", labels = list(format = "{value:%d-%b}"), title = list(text = "")) %>% 
+      hc_yAxis(title = list(text = "Cantidad de Respuestas")) %>%
+      hc_plotOptions(spline = list(
+        lineWidth = 2,
+        states = list(hover = list(lineWidth = 5)), #resalta la linea al pasar el mouse
+        marker = list(enabled = FALSE),
+        dataLabels=list(enabled=TRUE, format="<span style='color:{series.color}'>{point.y:.0f}</span>"))
+        ) %>% 
+      hc_add_theme(tema_general_hc) %>% 
+      hc_exporting(enabled = TRUE)
+
+  ))
+)
+
+```
+
+
+Row {data-height=350}
+-----------------------------------------------------------------------
+
+```{r Respuestas por Frecuencia Visita (demo4)}
+
+layout_column_wrap(
+  width = NULL,
+  style = css(grid_template_columns = "1fr 2fr"),
+  height = 340,
+  card(
+    full_screen = TRUE,
+    card_body(
+      data %>%
+      group_by(demo_4) %>%
+      count() %>% 
+      ungroup() %>% 
+      hchart(type="pie",hcaes(x=demo_4,y=n),name="Visitas") %>% 
+      hc_title(text="Respuestas por Visitas")%>%
+      # hc_subtitle(text="") %>%
+      hc_plotOptions(pie=list(
+        innerSize="55%",
+        tooltip=list(pointFormat="{point.y:,.0f} ({point.percentage:.0f}%)"),
+        dataLabels=list(enabled=TRUE,
+                        format="{point.name}</br>{point.y:,.0f} ({point.percentage:.0f}%)"))
+        )%>%
+      hc_yAxis(title=list(text=""))%>%
+      hc_xAxis(title=list(text=""))%>%
+      hc_add_theme(tema_general_hc) %>% 
+      hc_exporting(enabled=TRUE)
+  )),
+  card(
+    full_screen = TRUE,
+    card_body(
+     data %>%
+      group_by(floor_date(fecha, "day"),demo_4) %>%
+      count() %>% 
+      rename("dias"=1) %>% 
+      ungroup() %>% 
+      mutate(tiempo = dias %>% datetime_to_timestamp()) %>% 
+      hchart("spline", hcaes(x = tiempo, y = n, group = demo_4)) %>%
+      hc_title(text = "Respuestas por Visitas") %>%
+      hc_subtitle(text = "Tendencia diaria") %>% 
+      hc_xAxis(type = "datetime", labels = list(format = "{value:%d-%b}"), title = list(text = "")) %>% 
+      hc_yAxis(title = list(text = "Cantidad de Respuestas")) %>%
+      hc_plotOptions(spline = list(
+        lineWidth = 2,
+        states = list(hover = list(lineWidth = 5)), #resalta la linea al pasar el mouse
+        marker = list(enabled = FALSE),
+        dataLabels=list(enabled=TRUE, format="<span style='color:{series.color}'>{point.y:.0f}</span>"))
+        ) %>% 
+      hc_add_theme(tema_general_hc) %>% 
+      hc_exporting(enabled = TRUE)
+
+  ))
+)
+
+```
+
+
+General {data-orientation=rows}
+======================================================================
+
+Row {data-height=180}
+-----------------------------------------------------------------------
+
+### Value Boxes {.no-title}
+
+
+```{r Datos principales}
+
+color_stops <- data.frame(
+  q = c(0.4,0.6,1),
+  c = c("#F2124F","#E8C51C","#01CD74")
+)
+
+color_stops_nps <- data.frame(
+  q = c(0,0.4,0.6,1),
+  c = c("#F2124F","#F57E1D","#F5CC1D","#01CD74")
+)
+
+layout_column_wrap(
+  width = NULL,
+  style = css(grid_template_columns = "150px 1fr 1fr 1fr 1fr 1fr"),
+  height = 170,
+  gap = 5, #Espacio entre card de elementos en px
+  # fixed_width =  TRUE,
+  value_box(
+    h1("Total Respuestas", style = "font-size: 12px;font-family: Roboto, Arial"),
+    # value = respuestas_totales$n,
+    p(respuestas_totales$n, style = "font-family: Roboto, Arial;font-weight: bold"),
+    theme = value_box_theme(bg = "#FFF", fg = "#1B1D66")),
+    card(
+    highchart() %>%
+    hc_chart(type = "solidgauge",
+             spacingTop = 5,
+             marginTop = 25) %>%
+    hc_pane(startAngle = -90, endAngle = 90, size = "195%", center = c("50%","100%"),
+            background = list(shape = "arc", outerRadius = "100%", innerRadius = "60%", borderRadius = 5)) %>%
+    hc_add_series(data = cx_global$cx_global,
+                  dataLabels = list(borderWidth = 0, userHTML = TRUE,
+                                    style = list(fontSize = "28px"),
+                                    format = "{point.y}%")) %>%
+    hc_title(text = "CX Index Global", align = "center",style = list(fontSize = "12px")) %>%
+    hc_yAxis(lineWidth = 0, minorTickInterval = 0, tickAmount = 2,min = 0, max = 100,
+             labels = list(y = 10,style = list(fontSize = "9px"), format = "{value}%"),
+             stops = list_parse2(color_stops)) %>%
+    hc_tooltip(enabled=FALSE) %>%
+    hc_add_theme(tema_general_hc)
+  ),
+  card(
+    highchart() %>%
+    hc_chart(type = "solidgauge",
+             spacingTop = 5,
+             marginTop = 25) %>%
+    hc_pane(startAngle = -90, endAngle = 90, size = "195%", center = c("50%","100%"),
+            background = list(shape = "arc", outerRadius = "100%", innerRadius = "60%", borderRadius = 5)) %>%
+    hc_add_series(data = cx_global$porcentaje_csat_q,
+                  dataLabels = list(borderWidth = 0, userHTML = TRUE,
+                                    style = list(fontSize = "28px"),
+                                    format = "{point.y}%")) %>%
+    hc_title(text = "Satisfacción del Cliente Global", align = "center",style = list(fontSize = "12px")) %>%
+    hc_yAxis(lineWidth = 0, minorTickInterval = 0, tickAmount = 2,min = 0, max = 100,
+             labels = list(y = 10,style = list(fontSize = "9px"), format = "{value}%"),
+             stops = list_parse2(color_stops)) %>%
+    hc_tooltip(enabled=FALSE) %>%
+    hc_add_theme(tema_general_hc)
+  ),
+  card(
+    highchart() %>%
+    hc_chart(type = "solidgauge",
+             spacingTop = 5,
+             marginTop = 25) %>%
+    hc_pane(startAngle = -90, endAngle = 90, size = "195%", center = c("50%","100%"),
+            background = list(shape = "arc", outerRadius = "100%", innerRadius = "60%", borderRadius = 5)) %>%
+    hc_add_series(data = cx_global$porcentaje_repurchase_q,
+                  dataLabels = list(borderWidth = 0, userHTML = TRUE,
+                                    style = list(fontSize = "28px"),
+                                    format = "{point.y}%")) %>%
+    hc_title(text = "Retorno del Cliente Global", align = "center",style = list(fontSize = "12px")) %>%
+    hc_yAxis(lineWidth = 0, minorTickInterval = 0, tickAmount = 2,min = 0, max = 100,
+             labels = list(y = 10,style = list(fontSize = "9px"), format = "{value}%"),
+             stops = list_parse2(color_stops)) %>%
+    hc_tooltip(enabled=FALSE) %>%
+    hc_add_theme(tema_general_hc)
+  ),
+  card(
+    highchart() %>%
+    hc_chart(type = "solidgauge",
+             spacingTop = 5,
+             marginTop = 25) %>%
+    hc_pane(startAngle = -90, endAngle = 90, size = "195%", center = c("50%","100%"),
+            background = list(shape = "arc", outerRadius = "100%", innerRadius = "60%", borderRadius = 5)) %>%
+    hc_add_series(data = cx_global$porcentaje_loyalty_q,
+                  dataLabels = list(borderWidth = 0, userHTML = TRUE,
+                                    style = list(fontSize = "28px"),
+                                    format = "{point.y}%")) %>%
+    hc_title(text = "Lealtad Global", align = "center",style = list(fontSize = "12px")) %>%
+    hc_yAxis(lineWidth = 0, minorTickInterval = 0, tickAmount = 2,min = 0, max = 100,
+             labels = list(y = 10,style = list(fontSize = "9px"), format = "{value}%"),
+             stops = list_parse2(color_stops)) %>%
+    hc_tooltip(enabled=FALSE) %>%
+    hc_add_theme(tema_general_hc)
+  ),
+  card(
+    highchart() %>%
+    hc_chart(type = "solidgauge",
+             spacingTop = 5,
+             marginTop = 25) %>%
+    hc_pane(startAngle = -90, endAngle = 90, size = "195%", center = c("50%","100%"),
+            background = list(shape = "arc", outerRadius = "100%", innerRadius = "60%", borderRadius = 5)) %>%
+    hc_add_series(data = cx_global$porcentaje_nps_q,
+                  dataLabels = list(borderWidth = 0, userHTML = TRUE,
+                                    style = list(fontSize = "28px"),
+                                    format = "{point.y}%")) %>%
+    hc_title(text = "NPS Global", align = "center",style = list(fontSize = "12px")) %>%
+    hc_yAxis(lineWidth = 0, minorTickInterval = 0, tickAmount = 2,min = -100, max = 100,
+             labels = list(y = 10,style = list(fontSize = "9px"), format = "{value}%"),
+             stops = list_parse2(color_stops_nps)) %>%
+    hc_tooltip(enabled=FALSE) %>%
+    hc_add_theme(tema_general_hc)
+  )
+)
+
+
+```
+
+
+Row {data-height=350}
+-----------------------------------------------------------------------
+
+
+```{r CX tendencia diaria}
+
+layout_column_wrap(
+  height = 340,
+  card(
+    full_screen = TRUE,
+    card_body(
+      respuestas_diario %>% 
+        mutate(tiempo = dias %>% datetime_to_timestamp()) %>% 
+        hchart("column", hcaes(x = tiempo, y = n), name = "Respuestas", showInLegend = TRUE, yAxis = 1, 
+               visible = FALSE, color = "#39C5DE") %>%
+        hc_add_series(type = "line",data = cx_diario %>% mutate(tiempo = dias %>% datetime_to_timestamp()),
+              hcaes(x = tiempo, y = cx_global), name = "CX Índex", color = "#3F1B87",showInLegend = TRUE,
+              tooltip = list(pointFormat = "<span style='color:{series.color}'>●</span> {series.name}: <b>{point.y}%")) %>%
+        hc_title(text = "CX Índex") %>%
+        hc_subtitle(text = "Tendencia diaria") %>% 
+        hc_xAxis(type = "datetime", labels = list(format = "{value:%d-%b}"), title = list(text = "")) %>% 
+        hc_yAxis_multiples(list(
+          title = list(text = "CX Índex"), ceiling = 100, labels = list(format = "{text}%")),
+          list(
+          title = list(text = "Respuestas"), opposite = TRUE)
+        ) %>%
+        hc_add_theme(tema_general_hc) %>% 
+        hc_exporting(enabled = TRUE)
+    ))  
+)
+
+
+```
+
+
+Row {data-height=350}
+-----------------------------------------------------------------------
+
+```{r Satisfaccion al Cliente}
+
+layout_column_wrap(
+  width = NULL,
+  style = css(grid_template_columns = "1fr 2fr"),
+  height = 340,
+  card(
+    full_screen = TRUE,
+    card_body(
+      indicadores_global %>%
+        filter(indicador == "csat_q") %>% 
+        hchart("column", hcaes(y = porcentaje, z = respuestas, group = segmento) ) %>%
+        hc_chart(inverted = TRUE,polar = TRUE) %>%
+        hc_pane(innerSize = "20%") %>% 
+        hc_title(text = "Satisfacción del Cliente") %>%
+        hc_subtitle(text = "Segmentos de Respuestas") %>%
+        hc_xAxis(title = list(text = ""),gridLineWidth = 0,lineWidth = 0,labels = list(enabled = FALSE)) %>% 
+        hc_yAxis(title = list(text = ""),ceiling = 100, labels = list(enabled = FALSE),
+                 gridLineWidth = 0) %>%
+        hc_colors(c("#F2124F","#FE9B00","#39C5DE"))%>%
+        hc_plotOptions(column=list(
+          stacking = "normal",
+          dataLabels=list(enabled=TRUE, format="{point.name}</br>{point.y:.0f} % ({point.z:.0f})"))) %>% 
+        hc_tooltip(headerFormat = "", 
+        pointFormat = "<span style='color:{point.color}'>●</span> {series.name}: <b>{point.y:.0f} % 
+                   ({point.z:.0f})") %>% 
+        hc_add_theme(tema_general_hc) %>% 
+        hc_exporting(enabled = TRUE)
+  )),
+  card(
+    full_screen = TRUE,
+    card_body(
+      indicadores_diarios %>% 
+        filter(indicador == "csat_q",
+               segmento == "Satisfecho") %>% 
+        mutate(tiempo = dias %>% datetime_to_timestamp()) %>% 
+        hchart("line", hcaes(x = tiempo, y = porcentaje), name = "Satisfacción del Cliente") %>%
+        hc_title(text = "Satisfacción del Cliente") %>%
+        hc_subtitle(text = "Tendencia diaria - Segmento: Satisfecho") %>%
+        hc_xAxis(type = "datetime", labels = list(format = "{value:%d-%b}"), title = list(text = "")) %>% 
+        hc_yAxis(title = list(text = "CSAT Score"), ceiling = 100, labels = list(format = "{text}%")) %>%
+        hc_tooltip(pointFormat = "<span style='color:{series.color}'>●</span> {series.name}: <b>{point.y}%") %>% 
+        hc_add_theme(tema_general_hc) %>% 
+        hc_exporting(enabled = TRUE)
+  ))
+)
+
+```
+
+
+Row {data-height=350}
+-----------------------------------------------------------------------
+
+```{r Retorno del Cliente}
+
+layout_column_wrap(
+  width = NULL,
+  style = css(grid_template_columns = "1fr 2fr"),
+  height = 340,
+  card(
+    full_screen = TRUE,
+    card_body(
+      indicadores_global %>%
+        filter(indicador == "repurchase_q") %>% 
+        hchart("column", hcaes(y = porcentaje, z = respuestas, group = segmento) ) %>%
+        hc_chart(inverted = TRUE,polar = TRUE) %>%
+        hc_pane(innerSize = "20%") %>% 
+        hc_title(text = "Retorno del Cliente") %>%
+        hc_subtitle(text = "Segmentos de Respuestas") %>%
+        hc_xAxis(title = list(text = ""),gridLineWidth = 0,lineWidth = 0,labels = list(enabled = FALSE)) %>% 
+        hc_yAxis(title = list(text = ""),ceiling = 100, labels = list(enabled = FALSE),
+                 gridLineWidth = 0) %>%
+        hc_colors(c("#F2124F","#FE9B00","#39C5DE"))%>%
+        hc_plotOptions(column=list(
+          stacking = "normal",
+          dataLabels=list(enabled=TRUE, format="{point.name}</br>{point.y:.0f} % ({point.z:.0f})"))) %>% 
+        hc_tooltip(headerFormat = "", 
+        pointFormat = "<span style='color:{point.color}'>●</span> {series.name}: <b>{point.y:.0f} % 
+                   ({point.z:.0f})") %>% 
+        hc_add_theme(tema_general_hc) %>% 
+        hc_exporting(enabled = TRUE)
+  )),
+  card(
+    full_screen = TRUE,
+    card_body(
+      indicadores_diarios %>% 
+        filter(indicador == "repurchase_q",
+               segmento == "Satisfecho") %>% 
+        mutate(tiempo = dias %>% datetime_to_timestamp()) %>% 
+        hchart("line", hcaes(x = tiempo, y = porcentaje), name = "Retorno del Cliente") %>%
+        hc_title(text = "Retorno del Cliente") %>%
+        hc_subtitle(text = "Tendencia diaria - Segmento: Satisfecho") %>%
+        hc_xAxis(type = "datetime", labels = list(format = "{value:%d-%b}"), title = list(text = "")) %>% 
+        hc_yAxis(title = list(text = "RePurchase Score"), ceiling = 100, labels = list(format = "{text}%")) %>%
+        hc_tooltip(pointFormat = "<span style='color:{series.color}'>●</span> {series.name}: <b>{point.y}%") %>% 
+        hc_add_theme(tema_general_hc) %>% 
+        hc_exporting(enabled = TRUE)
+  ))
+)
+
+```
+
+
+Row {data-height=350}
+-----------------------------------------------------------------------
+
+```{r Lealtad}
+
+layout_column_wrap(
+  width = NULL,
+  style = css(grid_template_columns = "1fr 2fr"),
+  height = 340,
+  card(
+    full_screen = TRUE,
+    card_body(
+      indicadores_global %>%
+        filter(indicador == "loyalty_q") %>% 
+        hchart("column", hcaes(y = porcentaje, z = respuestas, group = segmento) ) %>%
+        hc_chart(inverted = TRUE,polar = TRUE) %>%
+        hc_pane(innerSize = "20%") %>% 
+        hc_title(text = "Lealtad") %>%
+        hc_subtitle(text = "Segmentos de Respuestas") %>%
+        hc_xAxis(title = list(text = ""),gridLineWidth = 0,lineWidth = 0,labels = list(enabled = FALSE)) %>% 
+        hc_yAxis(title = list(text = ""),ceiling = 100, labels = list(enabled = FALSE),
+                 gridLineWidth = 0) %>%
+        hc_colors(c("#F2124F","#FE9B00","#39C5DE"))%>%
+        hc_plotOptions(column=list(
+          stacking = "normal",
+          dataLabels=list(enabled=TRUE, format="{point.name}</br>{point.y:.0f} % ({point.z:.0f})"))) %>% 
+        hc_tooltip(headerFormat = "", 
+        pointFormat = "<span style='color:{point.color}'>●</span> {series.name}: <b>{point.y:.0f} % 
+                   ({point.z:.0f})") %>% 
+        hc_add_theme(tema_general_hc) %>% 
+        hc_exporting(enabled = TRUE)
+  )),
+  card(
+    full_screen = TRUE,
+    card_body(
+      indicadores_diarios %>% 
+        filter(indicador == "loyalty_q",
+               segmento == "Satisfecho") %>% 
+        mutate(tiempo = dias %>% datetime_to_timestamp()) %>% 
+        hchart("line", hcaes(x = tiempo, y = porcentaje), name = "Lealtad") %>%
+        hc_title(text = "Lealtad") %>%
+        hc_subtitle(text = "Tendencia diaria - Segmento: Satisfecho") %>%
+        hc_xAxis(type = "datetime", labels = list(format = "{value:%d-%b}"), title = list(text = "")) %>% 
+        hc_yAxis(title = list(text = "Loyalty Score"), ceiling = 100, labels = list(format = "{text}%")) %>%
+        hc_tooltip(pointFormat = "<span style='color:{series.color}'>●</span> {series.name}: <b>{point.y}%") %>% 
+        hc_add_theme(tema_general_hc) %>% 
+        hc_exporting(enabled = TRUE)
+  ))
+)
+
+```
+
+
+Row {data-height=350}
+-----------------------------------------------------------------------
+
+```{r NPS}
+
+layout_column_wrap(
+  width = NULL,
+  style = css(grid_template_columns = "1fr 2fr"),
+  height = 340,
+  card(
+    full_screen = TRUE,
+    card_body(
+      data %>% 
+        count(nps_numeros) %>% 
+        mutate(porcentaje = round(n/sum(n)*100,digits = 0),
+               color_grupo = case_when(nps_numeros<=6 ~ "#F2124F",
+                                       nps_numeros<=8 ~ "#FE9B00",
+                                       nps_numeros<=10 ~ "#01CD74")) %>% 
+        hchart("column", hcaes(x = nps_numeros, y = porcentaje, z = n,color = color_grupo), name = "Respuestas") %>%
+        hc_title(text = "Net Promoter Score") %>%
+        hc_subtitle(text = "Frecuencias por Nivel de Respuesta") %>%
+        hc_xAxis(title = list(text = "Escala de Respuestas")) %>% 
+        hc_yAxis(title = list(text = "Porcentaje"),ceiling = 100, labels = list(format = "{text}%")) %>%
+        hc_plotOptions(column=list(
+          dataLabels=list(enabled=TRUE, format="{point.name}</br>{point.y:.0f} % ({point.z:.0f})"))) %>% 
+        hc_tooltip(pointFormat = "<span style='color:{point.color}'>●</span> {series.name}: <b>{point.y:.0f} % 
+                   ({point.z:.0f})") %>% 
+        hc_add_theme(tema_general_hc) %>% 
+        hc_exporting(enabled = TRUE)
+  )),
+  card(
+    full_screen = TRUE,
+    card_body(
+      nps_diario %>% 
+        mutate(tiempo = dias %>% datetime_to_timestamp()) %>% 
+        hchart("line", hcaes(x = tiempo, y = nps_score), name = "NPS") %>%
+        hc_title(text = "Net Promoter Score") %>%
+        hc_subtitle(text = "Tendencia diaria") %>%
+        hc_xAxis(type = "datetime", labels = list(format = "{value:%d-%b}"), title = list(text = "")) %>% 
+        hc_yAxis(title = list(text = "NPS Score"), ceiling = 100,labels = list(format = "{text}%")) %>%
+        hc_tooltip(pointFormat = "<span style='color:{series.color}'>●</span> {series.name}: <b>{point.y}%") %>% 
+        hc_add_theme(tema_general_hc) %>% 
+        hc_exporting(enabled = TRUE)
+  ))
+)
+
+```
+

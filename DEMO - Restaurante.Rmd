@@ -707,7 +707,7 @@ Row {data-height=12}
   <p style="background:transparent; padding:4px; border-radius:6px;
             font-size:10px; color:#003366; margin:0; text-align:right;">
     <b>Última actualización:</b>
-    `r format(ultima_actualizacion, "%d-%m-%Y %H:%M")`
+    `r format(ultima_actualizacion, "%d-%m-%Y %H:%M",tz = "America/El_Salvador")`
   </p>
 
 </div>
